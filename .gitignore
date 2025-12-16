@@ -1,0 +1,23 @@
+# build artifacts
+build/
+**/build/
+target/
+out/
+
+# logs
+logs/
+*.log
+
+# env/secrets
+.env
+*.pem
+*.key
+
+# node
+node_modules/
+
+# OS/IDE
+.DS_Store
+.idea/
+.vscode/
+*.iml
