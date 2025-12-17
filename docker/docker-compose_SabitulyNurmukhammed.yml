@@ -20,7 +20,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile_SabitulyNurmukhammed
-    image: tg/todo-app:1.1
+    image: ${APP_IMAGE:-tg/todo-app:1.1}
     container_name: online_library
     env_file:
       - .env

@@ -1,0 +1,111 @@
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+  }
+
+  environment {
+    APP_DIR    = 'app/online-library'
+    DOCKERFILE = 'docker/Dockerfile_SabitulyNurmukhammed'
+    COMPOSE    = 'docker/docker-compose_SabitulyNurmukhammed.yml'
+
+    // ВАЖНО:
+    // Если ты выбрал GHCR -> оставь ghcr.io/...
+    // Если Docker Hub -> поменяй на devilishzbc/online-library
+    IMAGE_REPO = 'ghcr.io/devilishzbc/online-library'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script {
+          def sha = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
+          def b   = (env.BRANCH_NAME ?: 'manual').replaceAll('[^A-Za-z0-9_.-]','-')
+          env.IMAGE_TAG = "${b}-${env.BUILD_NUMBER}-${sha}"
+          env.APP_IMAGE = "${env.IMAGE_REPO}:${env.IMAGE_TAG}"
+          env.REG_HOST  = env.IMAGE_REPO.startsWith('ghcr.io/') ? 'ghcr.io' : ''
+        }
+      }
+    }
+
+    stage('Build') {
+      steps {
+        dir(env.APP_DIR) {
+          sh 'chmod +x ./gradlew'
+          sh './gradlew --no-daemon clean build'
+        }
+      }
+    }
+
+    stage('Test') {
+      steps {
+        dir(env.APP_DIR) {
+          sh './gradlew --no-daemon test'
+        }
+      }
+      post {
+        always {
+          junit 'app/online-library/build/test-results/test/*.xml'
+        }
+      }
+    }
+
+    stage('Static Analysis (optional)') {
+      steps {
+        dir(env.APP_DIR) {
+          sh '''
+            set -e
+            if ./gradlew --no-daemon tasks --all | grep -qE "(checkstyleMain|spotbugsMain)"; then
+              ./gradlew --no-daemon checkstyleMain checkstyleTest
+              ./gradlew --no-daemon spotbugsMain spotbugsTest
+            else
+              echo "No Checkstyle/SpotBugs tasks found -> skipping"
+            fi
+          '''
+        }
+      }
+    }
+
+    stage('Docker Build (dynamic tag)') {
+      steps {
+        sh 'docker build -t "$APP_IMAGE" -f "$DOCKERFILE" .'
+      }
+    }
+
+    stage('Docker Push') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'docker-registry', usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
+          sh '''
+            set -e
+            if [ -n "$REG_HOST" ]; then
+              echo "$REG_PASS" | docker login "$REG_HOST" -u "$REG_USER" --password-stdin
+            else
+              echo "$REG_PASS" | docker login -u "$REG_USER" --password-stdin
+            fi
+            docker push "$APP_IMAGE"
+            docker logout "$REG_HOST" 2>/dev/null || docker logout 2>/dev/null || true
+          '''
+        }
+      }
+    }
+
+    stage('Deploy (main only)') {
+      when { branch 'main' }
+      steps {
+        // ВАЖНО: compose должен уметь использовать переменную APP_IMAGE (см. ниже шаг 2.1.3)
+        sh 'APP_IMAGE="$APP_IMAGE" docker compose -f "$COMPOSE" up -d --no-build'
+        sh 'docker compose -f "$COMPOSE" ps'
+        sh 'curl -fsS http://localhost:8081/actuator/health'
+      }
+    }
+  }
+
+  post {
+    success { echo "SUCCESS: ${env.APP_IMAGE}" }
+    failure { echo "FAILED: ${env.JOB_NAME} #${env.BUILD_NUMBER}" }
+    always  { archiveArtifacts artifacts: 'app/online-library/build/libs/*.jar', fingerprint: true }
+  }
+}
