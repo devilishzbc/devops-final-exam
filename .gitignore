@@ -22,3 +22,12 @@ node_modules/
 .vscode/
 *.iml
 docker/.env
+
+# Ansible Vault / secrets (Sabituly Nurmukhammed)
+ansible/group_vars/all/vault_*.yml
+.vault_pass_*
+
+# local binaries / artifacts
+kubectl
+minikube-linux-amd64
+docker/--env-file
